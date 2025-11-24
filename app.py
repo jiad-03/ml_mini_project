@@ -1,135 +1,206 @@
-# app.py
 import streamlit as st
-import pandas as pd
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import numpy as np
 import matplotlib.pyplot as plt
+import time
+import base64
+import json
 from datetime import datetime
+from transformers import pipeline
 
-# Optional: transformers pipeline (if you installed transformers & torch)
-try:
-    from transformers import pipeline
-    hf_available = True
-except Exception:
-    hf_available = False
+# ---------------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="Emotion Analyzer",
+    layout="centered",
+)
 
-st.set_page_config(page_title="Mental-Health Sentiment Demo", layout="centered")
+# ---------------------------------------------------------
+# LOAD REAL EMOTION MODEL
+# ---------------------------------------------------------
+@st.cache_resource
+def load_emotion_model():
+    return pipeline(
+        "text-classification",
+        model="j-hartmann/emotion-english-distilroberta-base",
+        return_all_scores=True
+    )
 
-st.title("Mental-Health Aware Sentiment & Emotion Demo")
-st.markdown("Paste a short message (social post, chat message). App returns sentiment + simple emotion hints.")
+emotion_model = load_emotion_model()
 
-# sidebar
-model_choice = st.sidebar.selectbox("Model choice", ("VADER (fast)", "Transformer (higher quality)" if hf_available else "VADER (fast)"))
-max_history = st.sidebar.slider("History size", 5, 200, 50)
+# ---------------------------------------------------------
+# CUSTOM CSS FOR BEAUTIFUL UI
+# ---------------------------------------------------------
+st.markdown("""
+<style>
 
-# state for history
+    .main { background-color: #F9FAFB; }
+
+    .title {
+        font-size: 40px;
+        font-weight: 800;
+        text-align: center;
+        color: #333;
+    }
+
+    .subtitle {
+        font-size: 18px;
+        text-align: center;
+        color: #555;
+        margin-bottom: 25px;
+    }
+
+    .card {
+        background: white;
+        border-radius: 18px;
+        padding: 25px;
+        box-shadow: 0px 4px 20px rgba(0,0,0,0.1);
+        margin-top: 20px;
+    }
+
+    .emoji {
+        font-size: 60px;
+        text-align: center;
+        animation: bounce 1.5s infinite;
+    }
+
+    @keyframes bounce {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(-6px); }
+        100% { transform: translateY(0px); }
+    }
+
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# TITLE
+# ---------------------------------------------------------
+st.markdown("<div class='title'>Emotion Analyzer 🎭</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Analyze emotions, understand tone, view stats & download a report.</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# EMOTION MAPPING (HuggingFace → Your Labels)
+# ---------------------------------------------------------
+emotion_map = {
+    "sadness": ("Sadness 😔", "This message carries feelings of sadness, heaviness or emotional struggle."),
+    "joy": ("Happiness 😊", "This text expresses joy, positivity and an uplifting tone."),
+    "anger": ("Anger 😡", "There is frustration, irritation or strong negative feelings in this message."),
+    "fear": ("Fear 😨", "This message shows anxiety, worry or emotionally tense feelings."),
+    "surprise": ("Surprise 😲", "The message expresses amazement, shock or something unexpected."),
+    "neutral": ("Neutral 🙂", "The tone is balanced and does not show strong emotions.")
+}
+
+all_labels = list(emotion_map.keys())
+
+# ---------------------------------------------------------
+# THEME TOGGLE
+# ---------------------------------------------------------
+theme = st.toggle("🌗 Dark Theme")
+if theme:
+    st.write("<style>body { background-color: #111; color: #EEE; }</style>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# INPUT BOX
+# ---------------------------------------------------------
+st.write("### Enter your message:")
+user_text = st.text_area("", height=150)
+
+analyze = st.button("Analyze Emotion 🔍")
+
+# ---------------------------------------------------------
+# EMOTION HISTORY STORAGE
+# ---------------------------------------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
-st.markdown("### Try these examples:")
-examples = [
-    "I feel overwhelmed lately and can't focus on anything.",
-    "Today was great! I feel really proud of myself.",
-    "I'm anxious about the exam tomorrow.",
-    "I don't want to talk to anyone right now.",
-]
+# ---------------------------------------------------------
+# PREDICTION FUNCTION
+# ---------------------------------------------------------
+def predict_emotion(text):
+    output = emotion_model(text)
+    scores = sorted(output[0], key=lambda x: x["score"], reverse=True)
+    top = scores[0]
+    return top["label"], scores
 
-chosen_example = st.selectbox("Pick an example:", [""] + examples)
-if chosen_example:
-    txt = chosen_example
-else:
-    txt=""
-txt = st.text_area("Enter text (1-500 chars):", height=140, max_chars=1000)
-
-if st.button("Analyze"):
-    if not txt.strip():
-        st.warning("Please enter some text.")
+# ---------------------------------------------------------
+# MAIN ANALYSIS
+# ---------------------------------------------------------
+if analyze:
+    if user_text.strip() == "":
+        st.warning("Please type something to analyze.")
     else:
-        # analyze with VADER
-        analyzer = SentimentIntensityAnalyzer()
-        vs = analyzer.polarity_scores(txt)
-        compound = vs["compound"]
-        # map to simple label
-        if compound >= 0.05:
-            label = "Positive"
-        elif compound <= -0.05:
-            label = "Negative"
-        else:
-            label = "Neutral"
+        label, all_scores = predict_emotion(user_text)
 
-        # optional transformer emotions/sentiment
-        transformer_out = None
-        if hf_available and model_choice.startswith("Transformer"):
-            try:
-                sentiment_pipe = pipeline("sentiment-analysis", truncation=True)
-                transformer_out = sentiment_pipe(txt)[0]  # dict with label, score
-            except Exception as e:
-                transformer_out = {"error": str(e)}
+        emotion, interpretation = emotion_map[label]
+        score_dict = {s["label"]: s["score"] for s in all_scores}
+        sentiment_score = round(score_dict[label] * 100, 2)
 
-        # simple emotion heuristics (keywords)
-        emotions = {"sadness":0, "joy":0, "anger":0, "fear":0}
-        low_txt = txt.lower()
-        for k in emotions.keys():
-            if k in low_txt:
-                emotions[k] += 1
-        # add based on sentiment
-        if label == "Positive":
-            emotions["joy"] += 1
-        if label == "Negative":
-            emotions["sadness"] += 1
+        # Save history
+        st.session_state.history.append({
+            "text": user_text,
+            "emotion": emotion,
+            "score": sentiment_score,
+            "time": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        })
 
-        result = {
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "text": txt,
-            "vader_compound": compound,
-            "vader_label": label,
-            "transformer": transformer_out,
-            "emotions": emotions
+        # Result Card
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+
+        st.markdown(f"<div class='emoji'>{emotion.split()[-1]}</div>", unsafe_allow_html=True)
+        st.write(f"## 🎯 Emotion Detected: **{emotion}**")
+
+        st.write("### 📝 Interpretation:")
+        st.write(interpretation)
+
+        # Sentiment Strength Meter
+        st.write("### 🔥 Emotion Strength:")
+        st.progress(sentiment_score / 100)
+        st.write(f"**Strength:** {sentiment_score}%")
+
+        # Human-readable summary
+        st.write("### 💡 Summary Review:")
+        st.success(
+            f"The message strongly reflects **{emotion}**. "
+            f"Overall tone can be described as: **{interpretation}**"
+        )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Optional statistics
+        with st.expander("📊 View Detailed Statistics"):
+            fig, ax = plt.subplots()
+            ax.bar(
+                [emotion_map[l][0] for l in all_labels],
+                [score_dict.get(l, 0) for l in all_labels]
+            )
+            ax.set_title("Emotion Probability Distribution")
+            ax.set_ylabel("Probability")
+            st.pyplot(fig)
+
+        # Downloadable Report
+        report_data = {
+            "text": user_text,
+            "emotion": emotion,
+            "strength": sentiment_score,
+            "interpretation": interpretation,
         }
+        report_str = json.dumps(report_data, indent=4)
 
-        # save to history
-        st.session_state.history.insert(0, result)
-        # limit size
-        st.session_state.history = st.session_state.history[:max_history]
+        st.download_button(
+            label="📄 Download Emotion Report",
+            data=report_str,
+            file_name="emotion_report.txt",
+            mime="text/plain",
+        )
 
-# show last analysis
-if st.session_state.history:
-    latest = st.session_state.history[0]
-    st.subheader("Latest analysis")
-    st.write("**Text:**", latest["text"])
-    st.write("**VADER compound:**", round(latest["vader_compound"], 3), "— **", latest["vader_label"], "**")
-    if latest["transformer"]:
-        st.write("**Transformer output:**", latest["transformer"])
-    st.write("**Emotion hints (simple):**", latest["emotions"])
-
-    # plot history of compound scores
-    df = pd.DataFrame([{"time":h["time"], "compound":h["vader_compound"]} for h in st.session_state.history])
-    df["time"] = pd.to_datetime(df["time"])
-    st.subheader("History of scores")
-    fig, ax = plt.subplots(figsize=(6,3))
-    ax.plot(df["time"], df["compound"], marker="o")
-    ax.set_ylim(-1.05,1.05)
-    ax.set_ylabel("VADER compound score")
-    ax.set_xlabel("Time")
-    st.pyplot(fig)
-
-    st.subheader("Saved history (latest first)")
-    st.dataframe(df.sort_values("time", ascending=False).reset_index(drop=True))
-    import json
-    import csv
-    import io
-
-    csv_buffer = io.StringIO()
-    writer = csv.writer(csv_buffer)
-    writer.writerow(["time", "text", "compound", "label"])
-
-    for h in st.session_state.history:
-        writer.writerow([h["time"], h["text"], h["vader_compound"], h["vader_label"]])
-
-    st.download_button(
-        label="Download History as CSV",
-        data=csv_buffer.getvalue(),
-        file_name="sentiment_history.csv",
-        mime="text/csv"
-    )
-else:
-    st.info("No analyses yet — enter text and press Analyze.")
+# ---------------------------------------------------------
+# EMOTION HISTORY
+# ---------------------------------------------------------
+if len(st.session_state.history) > 0:
+    st.write("## 🕒 Analysis History")
+    for entry in reversed(st.session_state.history[-5:]):
+        with st.expander(f"{entry['time']} – {entry['emotion']} ({entry['score']}%)"):
+            st.write(f"**Message:** {entry['text']}")
+            st.write(f"**Emotion:** {entry['emotion']}")
+            st.write(f"**Strength:** {entry['score']}%")
