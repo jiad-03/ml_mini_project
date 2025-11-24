@@ -7,17 +7,15 @@ import json
 from datetime import datetime
 from transformers import pipeline
 
-# ---------------------------------------------------------
+
 # PAGE CONFIG
-# ---------------------------------------------------------
 st.set_page_config(
     page_title="Emotion Analyzer",
     layout="centered",
 )
 
-# ---------------------------------------------------------
+
 # LOAD REAL EMOTION MODEL
-# ---------------------------------------------------------
 @st.cache_resource
 def load_emotion_model():
     return pipeline(
@@ -28,9 +26,8 @@ def load_emotion_model():
 
 emotion_model = load_emotion_model()
 
-# ---------------------------------------------------------
+
 # CUSTOM CSS FOR BEAUTIFUL UI
-# ---------------------------------------------------------
 st.markdown("""
 <style>
 
@@ -73,15 +70,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------------
+
 # TITLE
-# ---------------------------------------------------------
 st.markdown("<div class='title'>Emotion Analyzer 🎭</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Analyze emotions, understand tone, view stats & download a report.</div>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------
+
 # EMOTION MAPPING (HuggingFace → Your Labels)
-# ---------------------------------------------------------
 emotion_map = {
     "sadness": ("Sadness 😔", "This message carries feelings of sadness, heaviness or emotional struggle."),
     "joy": ("Happiness 😊", "This text expresses joy, positivity and an uplifting tone."),
@@ -93,39 +88,34 @@ emotion_map = {
 
 all_labels = list(emotion_map.keys())
 
-# ---------------------------------------------------------
+
 # THEME TOGGLE
-# ---------------------------------------------------------
 theme = st.toggle("🌗 Dark Theme")
 if theme:
     st.write("<style>body { background-color: #111; color: #EEE; }</style>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------
+
 # INPUT BOX
-# ---------------------------------------------------------
 st.write("### Enter your message:")
 user_text = st.text_area("", height=150)
 
 analyze = st.button("Analyze Emotion 🔍")
 
-# ---------------------------------------------------------
+
 # EMOTION HISTORY STORAGE
-# ---------------------------------------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# ---------------------------------------------------------
+
 # PREDICTION FUNCTION
-# ---------------------------------------------------------
 def predict_emotion(text):
     output = emotion_model(text)
     scores = sorted(output[0], key=lambda x: x["score"], reverse=True)
     top = scores[0]
     return top["label"], scores
 
-# ---------------------------------------------------------
+
 # MAIN ANALYSIS
-# ---------------------------------------------------------
 if analyze:
     if user_text.strip() == "":
         st.warning("Please type something to analyze.")
@@ -194,9 +184,8 @@ if analyze:
             mime="text/plain",
         )
 
-# ---------------------------------------------------------
+
 # EMOTION HISTORY
-# ---------------------------------------------------------
 if len(st.session_state.history) > 0:
     st.write("## 🕒 Analysis History")
     for entry in reversed(st.session_state.history[-5:]):
